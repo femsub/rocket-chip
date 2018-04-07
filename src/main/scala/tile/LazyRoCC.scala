@@ -347,6 +347,122 @@ class CharacterCountExampleModule(outer: CharacterCountExample)(implicit p: Para
   tl_out.e.valid := Bool(false)
 }
 
+class  CordicExample(implicit p: Parameters) extends LazyRoCC {
+  override lazy val module = new CordicExampleModule(this)
+}
+
+class CordicExampleModule(outer: CordicExample, n: Int = 4)(implicit p: Parameters) extends LazyRoCCModule(outer)
+  with HasCoreParameters {
+  //val regfile = Mem(n, UInt(width = xLen))
+  //val busy = Reg(init = Vec.fill(n){Bool(false)})
+
+  val cmd = Queue(io.cmd)
+  val funct = cmd.bits.inst.funct
+  val addr = cmd.bits.rs2(log2Up(n)-1,0)  //rocc_rd
+  val dosin = funct === UInt(0)
+  val docos = funct === UInt(1)
+  val dosinh = funct === UInt(2)
+  val docosh = funct === UInt(3)
+  val memRespTag = io.mem.resp.bits.tag(log2Up(n)-1,0)
+
+  // datapath
+  val deg = cmd.bits.rs1
+  val ans = Wire(UInt(32.W))
+  //val accum = regfile(addr)
+  //val wdata = Mux(dosin, addend, accum + addend)
+  when(dosin || docos){
+    val init = Vec(Array(11520.S,6801.S,3593.S,1824.S,916.S,458.S,229.S,114.S,57.S,29.S,14.S,7.S,4.S,2.S,1.S))
+    val cos = Wire(Vec(16, SInt(16.W)))
+    val sin = Wire(Vec(16, SInt(16.W)))
+    val d = Wire(Vec(16, SInt(16.W)))
+    cos(0) := 155.S
+    sin(0) := 0.S
+    d(0) := deg.asSInt
+    //printf("%d %d",d(0),io.Deg)
+    for(i <- 0 until 15){
+      val sign=(d(i)>=0.S)
+      cos(i+1):=Mux(sign,cos(i)-(sin(i)>>i),cos(i)+(sin(i)>>i))
+      sin(i+1):=Mux(sign,(cos(i)>>i)+sin(i),-(cos(i)>>i)+sin(i))
+      d(i+1):=Mux(sign,d(i)-init(i),d(i)+init(i))
+    }
+    when (dosin){
+      ans := sin(15).asUInt
+    }
+    when (docos){
+      ans := cos(15).asUInt
+    }
+  }
+  when(dosinh || docosh){
+    val init = Vec(Array(754974720.S, 445687602.S, 235489088.S, 119537938.S, 60000934.S, 30029717.S, 15018523.S, 7509720.S, 3754917.S, 1877466.S, 938734.S, 469367.S, 234684.S, 117342.S, 58671.S, 29335.S, 14668.S, 7334.S, 3667.S, 1833.S, 917.S, 458.S, 229.S, 115.S, 57.S, 29.S, 14.S, 7.S, 4.S, 2.S, 1.S))
+    val cos = Wire(Vec(31, SInt(32.W)))
+    val sin = Wire(Vec(31, SInt(32.W)))
+    val d = Wire(Vec(31, SInt(32.W)))
+    cos(0) := 10188014.S
+    sin(0) := 0.S
+    d(0) := deg.asSInt
+    //printf("%d %d",d(0),io.Deg)
+    for(i <- 0 until 30){
+      val sign=(d(i)>=0.S)
+      cos(i+1):=Mux(sign,cos(i)-(sin(i)>>i),cos(i)+(sin(i)>>i))
+      sin(i+1):=Mux(sign,(cos(i)>>i)+sin(i),-(cos(i)>>i)+sin(i))
+      d(i+1):=Mux(sign,d(i)-init(i),d(i)+init(i))
+    }
+    when (dosinh){
+      ans := sin(30).asUInt
+    }
+    when (docosh){
+      ans := cos(30).asUInt
+    }
+  }
+
+  // when (cmd.fire() && (dosin || doAccum)) {
+  //   regfile(addr) := wdata
+  // }
+
+  // when (io.mem.resp.valid) {
+  //   regfile(memRespTag) := io.mem.resp.bits.data
+  //   busy(memRespTag) := Bool(false)
+  // }
+
+  // // control
+  // when (io.mem.req.fire()) {
+  //   busy(addr) := Bool(true)
+  // }
+
+  val doResp = cmd.bits.inst.xd
+  //val stallReg = busy(addr)
+  val stallLoad = !io.mem.req.ready
+  val stallResp = doResp && !io.resp.ready
+
+  cmd.ready := !stallLoad && !stallResp
+    // command resolved if no stalls AND not issuing a load that will need a request
+
+  // PROC RESPONSE INTERFACE
+  io.resp.valid := cmd.valid && doResp && !stallLoad
+  //io.resp.valid := cmd.valid && doResp && !stallReg && !stallLoad
+    // valid response if valid command, need a response, and no stalls
+  io.resp.bits.rd := cmd.bits.inst.rd
+    // Must respond with the appropriate tag or undefined behavior
+  io.resp.bits.data := ans
+    // Semantics is to always send out prior accumulator register value
+
+  io.busy := cmd.valid 
+    // Be busy when have pending memory requests or committed possibility of pending requests
+  io.interrupt := Bool(false)
+    // Set this true to trigger an interrupt on the processor (please refer to supervisor documentation)
+
+  // MEMORY REQUEST INTERFACE
+  // io.mem.req.valid := cmd.valid && doLoad && !stallReg && !stallResp
+  // io.mem.req.bits.addr := addend
+  // io.mem.req.bits.tag := addr
+  // io.mem.req.bits.cmd := M_XRD // perform a load (M_XWR for stores)
+  // io.mem.req.bits.typ := MT_D // D = 8 bytes, W = 4, H = 2, B = 1
+  // io.mem.req.bits.data := Bits(0) // we're not performing any stores...
+  // io.mem.req.bits.phys := Bool(false)
+  // io.mem.invalidate_lr := Bool(false)
+}
+
+
 class OpcodeSet(val opcodes: Seq[UInt]) {
   def |(set: OpcodeSet) =
     new OpcodeSet(this.opcodes ++ set.opcodes)
